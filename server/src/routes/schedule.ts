@@ -50,7 +50,7 @@ router.post('/:pollId/generate', adminAuth, (req: Request, res: Response) => {
     : [];
 
   res.json({
-    poll,
+    poll: getPollById(pollId),
     sessions,
     unscheduled_players: unscheduledPlayers,
     warnings: output.warnings,
@@ -93,7 +93,7 @@ router.post('/:pollId/generate/:day', adminAuth, (req: Request, res: Response) =
   const scheduledDays = [...new Set([...poll.scheduled_days, targetDay])].sort((a, b) => a - b) as DayOfWeek[];
   updatePollScheduledDays(pollId, scheduledDays);
 
-  // If all 6 playable days are scheduled, transition poll to 'scheduled'
+  // If all 7 playable days are scheduled, transition poll to 'scheduled'
   if (scheduledDays.length >= 7) {
     updatePollStatus(pollId, 'scheduled');
   }
