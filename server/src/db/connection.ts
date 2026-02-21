@@ -2,7 +2,8 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { initSchema } from './schema';
 
-const DB_PATH = path.resolve(__dirname, '../../data/pickleball.db');
+const DB_PATH = process.env.DATABASE_PATH
+  || path.resolve(__dirname, '../../data/pickleball.db');
 
 let db: Database.Database | null = null;
 

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { CONFIG } from './config';
 import { getDb } from './db/connection';
 import { errorHandler } from './middleware/errorHandler';
@@ -13,6 +14,7 @@ import adminRouter from './routes/admin';
 import archiveRouter from './routes/archive';
 
 const app = express();
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : CONFIG.PORT;
 
 app.use(cors());
 app.use(express.json());
@@ -25,6 +27,13 @@ app.use('/api/schedule', scheduleRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/archive', archiveRouter);
 
+// Serve static client in production
+const clientDist = path.resolve(__dirname, '../../client/dist');
+app.use(express.static(clientDist));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(clientDist, 'index.html'));
+});
+
 // Error handler
 app.use(errorHandler);
 
@@ -35,8 +44,8 @@ console.log('Database initialized');
 // Start cron jobs
 startPollCreatorJob();
 
-app.listen(CONFIG.PORT, () => {
-  console.log(`Server running on port ${CONFIG.PORT}`);
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
 
 export default app;
