@@ -10,4 +10,4 @@ export const HEBREW_DAYS: Record<DayOfWeek, string> = {
   6: 'שבת',
 };
 
-export const PLAYABLE_DAYS: DayOfWeek[] = [0, 1, 2, 3, 4, 5];
+export const PLAYABLE_DAYS: DayOfWeek[] = [0, 1, 2, 3, 4, 5, 6];

@@ -11,7 +11,7 @@ interface AdminPanelProps {
   onLogout: () => void;
 }
 
-const PLAYABLE_DAYS: DayOfWeek[] = [0, 1, 2, 3, 4, 5];
+const PLAYABLE_DAYS: DayOfWeek[] = [0, 1, 2, 3, 4, 5, 6];
 
 export function AdminPanel({ onLogout }: AdminPanelProps) {
   const queryClient = useQueryClient();

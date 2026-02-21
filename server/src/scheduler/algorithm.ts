@@ -173,7 +173,7 @@ export function generateSchedule(
   weekStart: string,
   votes: VoteWithPlayer[]
 ): ScheduleOutput {
-  const playableDays: DayOfWeek[] = [0, 1, 2, 3, 4, 5];
+  const playableDays: DayOfWeek[] = [0, 1, 2, 3, 4, 5, 6];
   const allSessions: Omit<Session, 'id'>[] = [];
   const allWarnings: string[] = [];
   const allUnscheduled = new Set<number>();

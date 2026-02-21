@@ -34,7 +34,7 @@ router.post('/:pollId/generate', adminAuth, (req: Request, res: Response) => {
   saveSessions(pollId, output.sessions);
 
   // Mark all playable days as scheduled
-  updatePollScheduledDays(pollId, [0, 1, 2, 3, 4, 5] as DayOfWeek[]);
+  updatePollScheduledDays(pollId, [0, 1, 2, 3, 4, 5, 6] as DayOfWeek[]);
 
   // Update poll status
   updatePollStatus(pollId, 'scheduled');
@@ -62,8 +62,8 @@ router.post('/:pollId/generate/:day', adminAuth, (req: Request, res: Response) =
   const pollId = Number(req.params.pollId);
   const targetDay = Number(req.params.day) as DayOfWeek;
 
-  if (targetDay < 0 || targetDay > 5) {
-    res.status(400).json({ error: 'Invalid day (must be 0-5)' });
+  if (targetDay < 0 || targetDay > 6) {
+    res.status(400).json({ error: 'Invalid day (must be 0-6)' });
     return;
   }
 
@@ -94,7 +94,7 @@ router.post('/:pollId/generate/:day', adminAuth, (req: Request, res: Response) =
   updatePollScheduledDays(pollId, scheduledDays);
 
   // If all 6 playable days are scheduled, transition poll to 'scheduled'
-  if (scheduledDays.length >= 6) {
+  if (scheduledDays.length >= 7) {
     updatePollStatus(pollId, 'scheduled');
   }
 

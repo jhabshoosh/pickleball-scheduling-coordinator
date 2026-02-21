@@ -76,7 +76,7 @@ export function startPollCreatorJob(): void {
       updatePollScheduledDays(poll.id, scheduledDays as DayOfWeek[]);
 
       // If all 6 playable days are scheduled, transition poll to 'scheduled'
-      if (scheduledDays.length >= 6) {
+      if (scheduledDays.length >= 7) {
         updatePollStatus(poll.id, 'scheduled');
         console.log('[Cron] All days scheduled, poll status -> scheduled');
       }

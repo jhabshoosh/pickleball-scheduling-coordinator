@@ -63,7 +63,7 @@ export function getDayDeadlines(
   scheduledDays: DayOfWeek[],
   now: Date = new Date()
 ): DayDeadlineInfo[] {
-  const playableDays: DayOfWeek[] = [0, 1, 2, 3, 4, 5];
+  const playableDays: DayOfWeek[] = [0, 1, 2, 3, 4, 5, 6];
   const scheduledSet = new Set(scheduledDays);
 
   return playableDays.map(day => {
