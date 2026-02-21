@@ -17,6 +17,15 @@ export interface Poll {
   status: PollStatus;
   created_by: string;
   extended_deadline: string | null;
+  scheduled_days: DayOfWeek[];
+}
+
+export type DayStatus = 'open' | 'closed' | 'scheduled';
+
+export interface DayDeadlineInfo {
+  day: DayOfWeek;
+  deadline: string; // ISO datetime
+  status: DayStatus;
 }
 
 export interface DayPreference {

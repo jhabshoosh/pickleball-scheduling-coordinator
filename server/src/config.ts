@@ -3,7 +3,7 @@ export const CONFIG = {
   ADMIN_CODE: 'pickle2024',
   TIMEZONE: 'Asia/Jerusalem',
   VOTING_DEADLINE_DAY: 6, // Saturday
-  VOTING_DEADLINE_HOUR: 18, // 18:00
+  VOTING_DEADLINE_HOUR: 20, // 20:00
   COSTS: {
     DOUBLES_TOTAL: 130, // 4-5 players
     SINGLES_TOTAL: 100, // 2-3 players

@@ -5,7 +5,7 @@ import { PollDaySelector } from './PollDaySelector';
 import { PreferenceRanker } from './PreferenceRanker';
 import { SessionLimits } from './SessionLimits';
 import { ConstraintToggles } from '@/components/constraints/ConstraintToggles';
-import { Poll, DayOfWeek, DayPreference, Constraint, Vote } from 'shared/types';
+import { Poll, DayOfWeek, DayPreference, Constraint, Vote, DayDeadlineInfo } from 'shared/types';
 
 interface VoteFormProps {
   poll: Poll;
@@ -14,15 +14,19 @@ interface VoteFormProps {
   onSubmit: (data: any) => Promise<void>;
   onDelete?: () => Promise<void>;
   isSubmitting?: boolean;
+  dayDeadlines?: DayDeadlineInfo[];
 }
 
-export function VoteForm({ poll, playerId, existingVote, onSubmit, onDelete, isSubmitting }: VoteFormProps) {
+export function VoteForm({ poll, playerId, existingVote, onSubmit, onDelete, isSubmitting, dayDeadlines }: VoteFormProps) {
   const [selectedDays, setSelectedDays] = useState<DayOfWeek[]>(existingVote?.available_days || []);
   const [preferences, setPreferences] = useState<DayPreference[]>(existingVote?.day_preferences || []);
   const [minSessions, setMinSessions] = useState(existingVote?.min_sessions || 1);
   const [maxSessions, setMaxSessions] = useState(existingVote?.max_sessions || 7);
   const [constraints, setConstraints] = useState<Constraint[]>(existingVote?.constraints || []);
   const [error, setError] = useState('');
+
+  const openDays = dayDeadlines?.filter(d => d.status === 'open').map(d => d.day) || [];
+  const anyDaysOpen = openDays.length > 0;
 
   // Update preferences when days change
   useEffect(() => {
@@ -62,19 +66,35 @@ export function VoteForm({ poll, playerId, existingVote, onSubmit, onDelete, isS
     });
   };
 
-  const isDeadlinePassed = new Date() > new Date(poll.voting_deadline);
-
-  if (isDeadlinePassed) {
+  // If no days are open at all, show closed message
+  if (dayDeadlines && !anyDaysOpen) {
     return (
       <Card>
         <CardContent className="py-8 text-center">
-          <p className="text-muted-foreground">ההצבעה נסגרה</p>
+          <p className="text-muted-foreground">ההצבעה נסגרה לכל הימים</p>
           {existingVote && (
             <p className="text-sm text-primary mt-2">ההצבעה שלך נשמרה</p>
           )}
         </CardContent>
       </Card>
     );
+  }
+
+  // Fallback: check legacy single deadline
+  if (!dayDeadlines) {
+    const isDeadlinePassed = new Date() > new Date(poll.voting_deadline);
+    if (isDeadlinePassed) {
+      return (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <p className="text-muted-foreground">ההצבעה נסגרה</p>
+            {existingVote && (
+              <p className="text-sm text-primary mt-2">ההצבעה שלך נשמרה</p>
+            )}
+          </CardContent>
+        </Card>
+      );
+    }
   }
 
   return (
@@ -87,6 +107,7 @@ export function VoteForm({ poll, playerId, existingVote, onSubmit, onDelete, isS
           <PollDaySelector
             selectedDays={selectedDays}
             onChange={setSelectedDays}
+            dayDeadlines={dayDeadlines}
           />
         </CardContent>
       </Card>

@@ -1,6 +1,7 @@
 import { getDb } from '../db/connection';
 import { CONFIG } from '../config';
-import { Poll, PollStatus } from '../../../shared/types';
+import { Poll, PollStatus, DayOfWeek, DayDeadlineInfo } from '../../../shared/types';
+import { getDayDeadlines } from '../../../shared/deadlines';
 import { addDays, nextSunday, format, setHours, setMinutes } from 'date-fns';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 
@@ -74,6 +75,17 @@ export function getAllPolls(): Poll[] {
   return rows.map(mapPollRow);
 }
 
+export function updatePollScheduledDays(id: number, scheduledDays: DayOfWeek[]): Poll | null {
+  const db = getDb();
+  db.prepare('UPDATE polls SET scheduled_days = ? WHERE id = ?')
+    .run(JSON.stringify(scheduledDays), id);
+  return getPollById(id);
+}
+
+export function getPollDayDeadlines(poll: Poll): DayDeadlineInfo[] {
+  return getDayDeadlines(poll.week_start, poll.scheduled_days);
+}
+
 function mapPollRow(row: any): Poll {
   return {
     id: row.id,
@@ -83,5 +95,6 @@ function mapPollRow(row: any): Poll {
     status: row.status as PollStatus,
     created_by: row.created_by,
     extended_deadline: row.extended_deadline,
+    scheduled_days: JSON.parse(row.scheduled_days || '[]'),
   };
 }

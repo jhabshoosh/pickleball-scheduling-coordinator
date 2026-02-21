@@ -4,7 +4,8 @@ import { useVote, usePollVotes } from '@/hooks/useVote';
 import { VoteForm } from '@/components/poll/VoteForm';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Player } from 'shared/types';
+import { Player, DayDeadlineInfo } from 'shared/types';
+import { HEBREW_DAYS } from '@/lib/constants';
 
 interface HomePageProps {
   player: Player;
@@ -28,8 +29,15 @@ export function HomePage({ player }: HomePageProps) {
     );
   }
 
-  const deadline = new Date(poll.voting_deadline);
-  const isOpen = poll.status === 'open' && new Date() < deadline;
+  const dayDeadlines: DayDeadlineInfo[] | undefined = (poll as any).day_deadlines;
+  const openDays = dayDeadlines?.filter(d => d.status === 'open') || [];
+  const nextDeadline = openDays.length > 0
+    ? openDays.reduce((earliest, d) =>
+        new Date(d.deadline) < new Date(earliest.deadline) ? d : earliest
+      )
+    : null;
+
+  const isOpen = poll.status === 'open' && openDays.length > 0;
 
   return (
     <div className="space-y-4">
@@ -38,9 +46,20 @@ export function HomePage({ player }: HomePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="font-bold">שבוע {poll.week_start}</p>
-              <p className="text-sm text-muted-foreground">
-                דדליין: {deadline.toLocaleDateString('he-IL')} {deadline.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
-              </p>
+              {nextDeadline ? (
+                <p className="text-sm text-muted-foreground">
+                  דדליין הבא (יום {HEBREW_DAYS[nextDeadline.day]}): {new Date(nextDeadline.deadline).toLocaleDateString('he-IL')}{' '}
+                  {new Date(nextDeadline.deadline).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">כל הימים נסגרו</p>
+              )}
+              {dayDeadlines && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {openDays.length} ימים פתוחים
+                  {poll.scheduled_days.length > 0 && ` | ${poll.scheduled_days.length} ימים תוזמנו`}
+                </p>
+              )}
             </div>
             <Badge variant={isOpen ? 'default' : 'secondary'}>
               {isOpen ? 'פתוח' : 'סגור'}
@@ -61,6 +80,7 @@ export function HomePage({ player }: HomePageProps) {
         onSubmit={submitVote}
         onDelete={vote ? deleteVote : undefined}
         isSubmitting={isSubmitting}
+        dayDeadlines={dayDeadlines}
       />
     </div>
   );

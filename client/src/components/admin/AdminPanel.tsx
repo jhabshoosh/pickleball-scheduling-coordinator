@@ -4,15 +4,19 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
-import { Poll } from 'shared/types';
+import { Poll, DayOfWeek } from 'shared/types';
+import { HEBREW_DAYS } from '@/lib/constants';
 
 interface AdminPanelProps {
   onLogout: () => void;
 }
 
+const PLAYABLE_DAYS: DayOfWeek[] = [0, 1, 2, 3, 4, 5];
+
 export function AdminPanel({ onLogout }: AdminPanelProps) {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [generatingDay, setGeneratingDay] = useState<DayOfWeek | null>(null);
 
   const { data: polls, isLoading } = useQuery<Poll[]>({
     queryKey: ['adminPolls'],
@@ -24,6 +28,20 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adminPolls'] });
       queryClient.invalidateQueries({ queryKey: ['currentPoll'] });
+    },
+  });
+
+  const generateDayMutation = useMutation({
+    mutationFn: ({ pollId, day }: { pollId: number; day: DayOfWeek }) =>
+      api.generateScheduleForDay(pollId, day),
+    onSuccess: () => {
+      setGeneratingDay(null);
+      queryClient.invalidateQueries({ queryKey: ['adminPolls'] });
+      queryClient.invalidateQueries({ queryKey: ['currentPoll'] });
+      queryClient.invalidateQueries({ queryKey: ['pollResults'] });
+    },
+    onError: () => {
+      setGeneratingDay(null);
     },
   });
 
@@ -59,6 +77,11 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  const handleGenerateDay = (pollId: number, day: DayOfWeek) => {
+    setGeneratingDay(day);
+    generateDayMutation.mutate({ pollId, day });
+  };
+
   const statusColors: Record<string, string> = {
     open: 'bg-green-100 text-green-800',
     closed: 'bg-yellow-100 text-yellow-800',
@@ -92,55 +115,84 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
         <p className="text-center text-muted-foreground">טוען...</p>
       ) : (
         <div className="space-y-3">
-          {polls?.map(poll => (
-            <Card key={poll.id}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-medium text-sm">{poll.week_start}</span>
-                  <span className={`text-xs px-2 py-1 rounded-full ${statusColors[poll.status]}`}>
-                    {statusLabels[poll.status]}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {poll.status === 'open' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => closeMutation.mutate(poll.id)}
-                    >
-                      סגור הצבעה
-                    </Button>
-                  )}
+          {polls?.map(poll => {
+            const scheduledSet = new Set(poll.scheduled_days || []);
+            return (
+              <Card key={poll.id}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-medium text-sm">{poll.week_start}</span>
+                    <span className={`text-xs px-2 py-1 rounded-full ${statusColors[poll.status]}`}>
+                      {statusLabels[poll.status]}
+                    </span>
+                  </div>
+
+                  {/* Per-day generate buttons */}
                   {(poll.status === 'open' || poll.status === 'closed') && (
-                    <Button
-                      size="sm"
-                      onClick={() => generateMutation.mutate(poll.id)}
-                      disabled={generateMutation.isPending}
-                    >
-                      {generateMutation.isPending ? 'מחשב...' : 'הרץ אלגוריתם'}
-                    </Button>
+                    <div className="mb-3">
+                      <p className="text-xs text-muted-foreground mb-2">תזמון לפי יום:</p>
+                      <div className="grid grid-cols-3 gap-1">
+                        {PLAYABLE_DAYS.map(day => (
+                          <Button
+                            key={day}
+                            size="sm"
+                            variant={scheduledSet.has(day) ? 'secondary' : 'outline'}
+                            disabled={scheduledSet.has(day) || generatingDay === day}
+                            onClick={() => handleGenerateDay(poll.id, day)}
+                            className="text-xs"
+                          >
+                            {scheduledSet.has(day)
+                              ? `${HEBREW_DAYS[day]} ✓`
+                              : generatingDay === day
+                                ? '...'
+                                : HEBREW_DAYS[day]}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                  {poll.status === 'scheduled' && (
-                    <Button
-                      size="sm"
-                      onClick={() => publishMutation.mutate(poll.id)}
-                    >
-                      פרסם
-                    </Button>
-                  )}
-                  {(poll.status === 'published' || poll.status === 'scheduled') && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => archiveMutation.mutate(poll.id)}
-                    >
-                      ארכיון
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+
+                  <div className="flex flex-wrap gap-2">
+                    {poll.status === 'open' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => closeMutation.mutate(poll.id)}
+                      >
+                        סגור הצבעה
+                      </Button>
+                    )}
+                    {(poll.status === 'open' || poll.status === 'closed') && (
+                      <Button
+                        size="sm"
+                        onClick={() => generateMutation.mutate(poll.id)}
+                        disabled={generateMutation.isPending}
+                      >
+                        {generateMutation.isPending ? 'מחשב...' : 'הרץ אלגוריתם (הכל)'}
+                      </Button>
+                    )}
+                    {poll.status === 'scheduled' && (
+                      <Button
+                        size="sm"
+                        onClick={() => publishMutation.mutate(poll.id)}
+                      >
+                        פרסם
+                      </Button>
+                    )}
+                    {(poll.status === 'published' || poll.status === 'scheduled') && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => archiveMutation.mutate(poll.id)}
+                      >
+                        ארכיון
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

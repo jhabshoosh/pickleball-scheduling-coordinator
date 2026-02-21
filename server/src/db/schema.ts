@@ -16,6 +16,7 @@ export function initSchema(db: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed','scheduled','published','archived')),
       created_by TEXT NOT NULL DEFAULT 'system',
       extended_deadline TEXT,
+      scheduled_days TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -61,4 +62,10 @@ export function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_poll ON sessions(poll_id);
     CREATE INDEX IF NOT EXISTS idx_reservation_player ON reservation_history(player_id);
   `);
+
+  // Migration: add scheduled_days column if missing (for existing databases)
+  const pollColumns = db.prepare("PRAGMA table_info(polls)").all() as any[];
+  if (!pollColumns.some((c: any) => c.name === 'scheduled_days')) {
+    db.exec("ALTER TABLE polls ADD COLUMN scheduled_days TEXT NOT NULL DEFAULT '[]'");
+  }
 }

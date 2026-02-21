@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { submitVote, getVoteByPollAndPlayer, deleteVote } from '../services/voteService';
-import { getPollById } from '../services/pollService';
+import { getPollById, getPollDayDeadlines } from '../services/pollService';
+import { DayOfWeek } from '../../../shared/types';
 
 const router = Router();
 
@@ -45,15 +46,62 @@ router.post('/', (req: Request, res: Response) => {
     return;
   }
 
-  // Check if deadline has passed
-  const deadline = new Date(poll.voting_deadline);
-  if (new Date() > deadline) {
-    res.status(400).json({ error: 'Voting deadline has passed' });
+  // Compute which days are still open
+  const dayDeadlines = getPollDayDeadlines(poll);
+  const openDays = new Set(
+    dayDeadlines.filter(d => d.status === 'open').map(d => d.day)
+  );
+
+  if (openDays.size === 0) {
+    res.status(400).json({ error: 'Voting deadline has passed for all days' });
     return;
   }
 
-  const vote = submitVote(parsed.data as any);
-  res.json(vote);
+  // Filter submitted data to only include open days, merge with existing vote for closed days
+  const existingVote = getVoteByPollAndPlayer(parsed.data.poll_id, parsed.data.player_id);
+
+  const submittedDays = parsed.data.available_days as DayOfWeek[];
+  const submittedPrefs = parsed.data.day_preferences;
+
+  // For closed/scheduled days, keep existing vote data
+  const closedDaysFromExisting = existingVote
+    ? existingVote.available_days.filter((d: DayOfWeek) => !openDays.has(d))
+    : [];
+  const closedPrefsFromExisting = existingVote
+    ? existingVote.day_preferences.filter((p: any) => !openDays.has(p.day))
+    : [];
+
+  // For open days, use submitted data
+  const openDaysSubmitted = submittedDays.filter(d => openDays.has(d));
+  const openPrefsSubmitted = submittedPrefs.filter((p: any) => openDays.has(p.day));
+
+  // Merge
+  const mergedDays = [...closedDaysFromExisting, ...openDaysSubmitted].sort((a, b) => a - b);
+  const mergedPrefs = [...closedPrefsFromExisting, ...openPrefsSubmitted];
+  // Re-normalize preference ranks
+  mergedPrefs.sort((a: any, b: any) => a.rank - b.rank);
+  const normalizedPrefs = mergedPrefs.map((p: any, i: number) => ({ ...p, rank: i + 1 }));
+
+  const mergedData = {
+    ...parsed.data,
+    available_days: mergedDays,
+    day_preferences: normalizedPrefs,
+  };
+
+  // Also merge constraints: keep constraints referencing closed days from existing
+  if (existingVote) {
+    const closedConstraints = existingVote.constraints.filter((c: any) => {
+      if (c.type === 'mutual_exclusion') {
+        return !openDays.has(c.days[0]) || !openDays.has(c.days[1]);
+      }
+      return false; // no_consecutive applies globally, use submitted
+    });
+    const openConstraints = parsed.data.constraints;
+    mergedData.constraints = [...closedConstraints, ...openConstraints];
+  }
+
+  const vote = submitVote(mergedData as any);
+  res.json({ ...vote, open_days: [...openDays] });
 });
 
 // GET /api/votes/:pollId/:playerId - Get player's vote

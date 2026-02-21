@@ -23,167 +23,122 @@ export interface ScheduleOutput {
   unscheduledPlayerIds: number[];
 }
 
-export function generateSchedule(
+/**
+ * Pre-seeds AssignmentState from already-scheduled sessions so constraints
+ * (mutual_exclusion, no_consecutive, max_sessions) are respected across days.
+ */
+export function seedStateFromSessions(existingSessions: Session[]): AssignmentState {
+  const state = createAssignmentState();
+  for (const session of existingSessions) {
+    for (const pid of session.player_ids) {
+      assignPlayer(state, pid, session.day_of_week);
+    }
+  }
+  return state;
+}
+
+/**
+ * Generate schedule for a single day, respecting constraints from already-scheduled sessions.
+ */
+export function generateScheduleForDay(
   pollId: number,
   weekStart: string,
-  votes: VoteWithPlayer[]
+  targetDay: DayOfWeek,
+  votes: VoteWithPlayer[],
+  existingSessions: Session[] = []
 ): ScheduleOutput {
   const warnings: string[] = [];
-  const state = createAssignmentState();
+  const state = seedStateFromSessions(existingSessions);
   const voteMap = new Map<number, VoteWithPlayer>();
   for (const v of votes) voteMap.set(v.player_id, v);
 
-  // Step 1: Build availability matrix
-  const dayAvailability = new Map<DayOfWeek, number[]>();
-  for (let d = 0; d <= 6; d++) {
-    dayAvailability.set(d as DayOfWeek, []);
-  }
-
+  // Build availability for the target day only
+  const availablePlayers: number[] = [];
   for (const vote of votes) {
-    for (const day of vote.available_days) {
-      dayAvailability.get(day)!.push(vote.player_id);
+    if (vote.available_days.includes(targetDay)) {
+      availablePlayers.push(vote.player_id);
     }
   }
 
-  // Step 2: Score days
-  const dayScores: DayScore[] = [];
-  for (const [day, players] of dayAvailability.entries()) {
-    if (players.length < 2) continue; // Need at least 2 players
+  // Filter eligible players (respecting constraints from pre-seeded state)
+  const eligible = availablePlayers.filter(pid => {
+    const vote = voteMap.get(pid)!;
+    const count = getPlayerSessionCount(state, pid);
+    if (count >= vote.max_sessions) return false;
+    return checkConstraints(pid, targetDay, vote, state);
+  });
 
-    let prefBonus = 0;
-    for (const pid of players) {
-      const vote = voteMap.get(pid)!;
-      const pref = vote.day_preferences.find(p => p.day === day);
-      if (pref) {
-        // Higher rank (lower number) = higher bonus
-        prefBonus += (8 - pref.rank);
-      }
-    }
-    const avgPrefBonus = players.length > 0 ? prefBonus / players.length : 0;
-
-    dayScores.push({
-      day,
-      score: players.length * 10 + avgPrefBonus,
-      availablePlayers: players,
-    });
-  }
-
-  // Sort by score descending
-  dayScores.sort((a, b) => b.score - a.score);
-
-  // Step 3: Greedy assignment
   const courtAssignments: CourtAssignment[] = [];
 
-  for (const dayScore of dayScores) {
-    const eligible = dayScore.availablePlayers.filter(pid => {
-      const vote = voteMap.get(pid)!;
-      const count = getPlayerSessionCount(state, pid);
-      if (count >= vote.max_sessions) return false;
-      return checkConstraints(pid, dayScore.day, vote, state);
-    });
-
-    if (eligible.length < 2) {
-      if (eligible.length === 1) {
-        warnings.push(`יום ${dayScore.day}: רק שחקן אחד זמין, לא ניתן לקבוע משחק`);
-      }
-      continue;
-    }
-
-    // Sort eligible by preference for this day (higher preference first)
+  if (eligible.length >= 2) {
+    // Sort eligible: prioritize players with min_sessions deficit, then by preference
     eligible.sort((a, b) => {
-      const prefA = voteMap.get(a)!.day_preferences.find(p => p.day === dayScore.day);
-      const prefB = voteMap.get(b)!.day_preferences.find(p => p.day === dayScore.day);
+      const voteA = voteMap.get(a)!;
+      const voteB = voteMap.get(b)!;
+      const countA = getPlayerSessionCount(state, a);
+      const countB = getPlayerSessionCount(state, b);
+      const deficitA = Math.max(0, voteA.min_sessions - countA);
+      const deficitB = Math.max(0, voteB.min_sessions - countB);
+      // Higher deficit first
+      if (deficitB !== deficitA) return deficitB - deficitA;
+      // Then by preference rank for this day
+      const prefA = voteA.day_preferences.find(p => p.day === targetDay);
+      const prefB = voteB.day_preferences.find(p => p.day === targetDay);
       const rankA = prefA ? prefA.rank : 99;
       const rankB = prefB ? prefB.rank : 99;
       return rankA - rankB;
     });
 
     if (eligible.length >= CONFIG.COURTS.TWO_COURTS_MIN && eligible.length <= CONFIG.COURTS.TWO_COURTS_MAX) {
-      // 2 courts
       const mid = Math.ceil(eligible.length / 2);
-      const court1Players = eligible.slice(0, mid);
-      const court2Players = eligible.slice(mid);
-
       courtAssignments.push({
-        day: dayScore.day,
+        day: targetDay,
         courtNumber: 1,
-        playerIds: court1Players,
-        isSingles: court1Players.length <= 3,
+        playerIds: eligible.slice(0, mid),
+        isSingles: eligible.slice(0, mid).length <= 3,
       });
       courtAssignments.push({
-        day: dayScore.day,
+        day: targetDay,
         courtNumber: 2,
-        playerIds: court2Players,
-        isSingles: court2Players.length <= 3,
+        playerIds: eligible.slice(mid),
+        isSingles: eligible.slice(mid).length <= 3,
       });
-
       for (const pid of eligible) {
-        assignPlayer(state, pid, dayScore.day);
+        assignPlayer(state, pid, targetDay);
       }
     } else if (eligible.length >= CONFIG.COURTS.MIN_DOUBLES) {
-      // 1 court, 4-5 players
       const players = eligible.slice(0, CONFIG.COURTS.MAX_PER_COURT);
       courtAssignments.push({
-        day: dayScore.day,
+        day: targetDay,
         courtNumber: 1,
         playerIds: players,
         isSingles: false,
       });
       for (const pid of players) {
-        assignPlayer(state, pid, dayScore.day);
+        assignPlayer(state, pid, targetDay);
       }
     } else if (eligible.length >= CONFIG.COURTS.SINGLES_MIN) {
-      // Singles: 2-3 players
       const players = eligible.slice(0, CONFIG.COURTS.SINGLES_MAX);
       courtAssignments.push({
-        day: dayScore.day,
+        day: targetDay,
         courtNumber: 1,
         playerIds: players,
         isSingles: true,
       });
-      warnings.push(`יום ${dayScore.day}: ${players.length} שחקנים - משחק סינגלס`);
+      warnings.push(`יום ${targetDay}: ${players.length} שחקנים - משחק סינגלס`);
       for (const pid of players) {
-        assignPlayer(state, pid, dayScore.day);
+        assignPlayer(state, pid, targetDay);
       }
     }
+  } else if (eligible.length === 1) {
+    warnings.push(`יום ${targetDay}: רק שחקן אחד זמין, לא ניתן לקבוע משחק`);
   }
 
-  // Step 4: Optimization pass - try to satisfy minSessions
-  for (const vote of votes) {
-    const count = getPlayerSessionCount(state, vote.player_id);
-    if (count < vote.min_sessions) {
-      // Try to add player to existing sessions or create new ones
-      for (const dayScore of dayScores) {
-        if (getPlayerSessionCount(state, vote.player_id) >= vote.min_sessions) break;
-        if (!vote.available_days.includes(dayScore.day)) continue;
-        if (state.playerAssignments.get(vote.player_id)?.has(dayScore.day)) continue;
-        if (!checkConstraints(vote.player_id, dayScore.day, vote, state)) continue;
-
-        // Try to add to existing court assignment for this day
-        const existingCourts = courtAssignments.filter(ca => ca.day === dayScore.day);
-        let added = false;
-        for (const court of existingCourts) {
-          if (court.playerIds.length < CONFIG.COURTS.MAX_PER_COURT) {
-            court.playerIds.push(vote.player_id);
-            assignPlayer(state, vote.player_id, dayScore.day);
-            added = true;
-            break;
-          }
-        }
-
-        if (!added) {
-          warnings.push(`לא ניתן לספק מינימום משחקים ל${vote.player_name || `שחקן ${vote.player_id}`}`);
-        }
-      }
-    }
-  }
-
-  // Step 5: Build sessions with costs and reservers
+  // Build sessions
   const startDate = new Date(weekStart);
   const sessions: Omit<Session, 'id'>[] = courtAssignments.map(ca => {
     const sessionDate = addDays(startDate, ca.day);
     const { totalCost, costPerPerson, isSingles } = calculateCost(ca.playerIds.length);
-
     return {
       poll_id: pollId,
       day_of_week: ca.day,
@@ -191,7 +146,7 @@ export function generateSchedule(
       time: CONFIG.DEFAULT_TIME,
       court_number: ca.courtNumber,
       player_ids: ca.playerIds,
-      reserver_id: null, // Will be set by optimizer
+      reserver_id: null,
       is_singles: isSingles,
       total_cost: totalCost,
       cost_per_person: costPerPerson,
@@ -199,13 +154,57 @@ export function generateSchedule(
     };
   });
 
-  // Find unscheduled players
-  const allPlayerIds = new Set(votes.map(v => v.player_id));
+  // Unscheduled = players available for this day but not assigned
   const scheduledPlayerIds = new Set<number>();
   for (const s of sessions) {
     for (const pid of s.player_ids) scheduledPlayerIds.add(pid);
   }
-  const unscheduledPlayerIds = [...allPlayerIds].filter(id => !scheduledPlayerIds.has(id));
+  const unscheduledPlayerIds = availablePlayers.filter(id => !scheduledPlayerIds.has(id));
 
   return { sessions, warnings, unscheduledPlayerIds };
+}
+
+/**
+ * Generate schedule for all days at once (wrapper for admin "generate all" override).
+ * Calls generateScheduleForDay in sequence so constraints accumulate across days.
+ */
+export function generateSchedule(
+  pollId: number,
+  weekStart: string,
+  votes: VoteWithPlayer[]
+): ScheduleOutput {
+  const playableDays: DayOfWeek[] = [0, 1, 2, 3, 4, 5];
+  const allSessions: Omit<Session, 'id'>[] = [];
+  const allWarnings: string[] = [];
+  const allUnscheduled = new Set<number>();
+
+  // Build fake existing sessions array that grows as we process each day
+  const accumulatedSessions: Session[] = [];
+
+  for (const day of playableDays) {
+    const dayOutput = generateScheduleForDay(pollId, weekStart, day, votes, accumulatedSessions);
+    allSessions.push(...dayOutput.sessions);
+    allWarnings.push(...dayOutput.warnings);
+    for (const pid of dayOutput.unscheduledPlayerIds) allUnscheduled.add(pid);
+
+    // Add generated sessions (with fake ids) to accumulated for next day's constraints
+    for (const s of dayOutput.sessions) {
+      accumulatedSessions.push({ ...s, id: -1 } as Session);
+    }
+  }
+
+  // Remove from unscheduled anyone who was scheduled on any day
+  const scheduledPlayerIds = new Set<number>();
+  for (const s of allSessions) {
+    for (const pid of s.player_ids) {
+      scheduledPlayerIds.add(pid);
+      allUnscheduled.delete(pid);
+    }
+  }
+
+  return {
+    sessions: allSessions,
+    warnings: allWarnings,
+    unscheduledPlayerIds: [...allUnscheduled],
+  };
 }

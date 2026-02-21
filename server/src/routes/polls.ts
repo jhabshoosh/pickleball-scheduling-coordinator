@@ -1,18 +1,19 @@
 import { Router, Request, Response } from 'express';
-import { getCurrentPoll, getPollById } from '../services/pollService';
+import { getCurrentPoll, getPollById, getPollDayDeadlines } from '../services/pollService';
 import { getVotesForPoll } from '../services/voteService';
 import { getSessionsForPoll } from '../services/scheduleService';
 
 const router = Router();
 
-// GET /api/polls/current - Get active poll
+// GET /api/polls/current - Get active poll with per-day deadline info
 router.get('/current', (_req: Request, res: Response) => {
   const poll = getCurrentPoll();
   if (!poll) {
     res.status(404).json({ error: 'No active poll' });
     return;
   }
-  res.json(poll);
+  const day_deadlines = getPollDayDeadlines(poll);
+  res.json({ ...poll, day_deadlines });
 });
 
 // GET /api/polls/:id - Get poll by id

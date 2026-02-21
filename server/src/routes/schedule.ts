@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { adminAuth } from '../middleware/adminAuth';
-import { getPollById, updatePollStatus } from '../services/pollService';
+import { getPollById, updatePollStatus, updatePollScheduledDays } from '../services/pollService';
 import { getVotesForPoll } from '../services/voteService';
-import { saveSessions, getSessionsForPoll } from '../services/scheduleService';
-import { generateSchedule } from '../scheduler/algorithm';
+import { saveSessions, saveSessionsForDay, getSessionsForPoll, getSessionsForPollAsPlain } from '../services/scheduleService';
+import { generateSchedule, generateScheduleForDay } from '../scheduler/algorithm';
 import { optimize } from '../scheduler/optimizer';
 import { formatWhatsAppMessage } from '../services/whatsappService';
 import { getDb } from '../db/connection';
+import { DayOfWeek } from '../../../shared/types';
 
 const router = Router();
 
@@ -32,6 +33,9 @@ router.post('/:pollId/generate', adminAuth, (req: Request, res: Response) => {
   // Save sessions
   saveSessions(pollId, output.sessions);
 
+  // Mark all playable days as scheduled
+  updatePollScheduledDays(pollId, [0, 1, 2, 3, 4, 5] as DayOfWeek[]);
+
   // Update poll status
   updatePollStatus(pollId, 'scheduled');
 
@@ -49,6 +53,57 @@ router.post('/:pollId/generate', adminAuth, (req: Request, res: Response) => {
     poll,
     sessions,
     unscheduled_players: unscheduledPlayers,
+    warnings: output.warnings,
+  });
+});
+
+// POST /api/schedule/:pollId/generate/:day - Run algorithm for a single day (admin)
+router.post('/:pollId/generate/:day', adminAuth, (req: Request, res: Response) => {
+  const pollId = Number(req.params.pollId);
+  const targetDay = Number(req.params.day) as DayOfWeek;
+
+  if (targetDay < 0 || targetDay > 5) {
+    res.status(400).json({ error: 'Invalid day (must be 0-5)' });
+    return;
+  }
+
+  const poll = getPollById(pollId);
+  if (!poll) {
+    res.status(404).json({ error: 'Poll not found' });
+    return;
+  }
+
+  const votes = getVotesForPoll(pollId);
+  if (votes.length === 0) {
+    res.status(400).json({ error: 'No votes submitted' });
+    return;
+  }
+
+  // Get existing sessions for constraint pre-seeding
+  const existingSessions = getSessionsForPollAsPlain(pollId);
+
+  // Generate schedule for the target day
+  let output = generateScheduleForDay(pollId, poll.week_start, targetDay, votes, existingSessions);
+  output = optimize(output);
+
+  // Save sessions for this day only
+  saveSessionsForDay(pollId, targetDay, output.sessions);
+
+  // Update scheduled_days
+  const scheduledDays = [...new Set([...poll.scheduled_days, targetDay])].sort((a, b) => a - b) as DayOfWeek[];
+  updatePollScheduledDays(pollId, scheduledDays);
+
+  // If all 6 playable days are scheduled, transition poll to 'scheduled'
+  if (scheduledDays.length >= 6) {
+    updatePollStatus(pollId, 'scheduled');
+  }
+
+  const sessions = getSessionsForPoll(pollId);
+
+  res.json({
+    poll: getPollById(pollId),
+    sessions,
+    day_scheduled: targetDay,
     warnings: output.warnings,
   });
 });

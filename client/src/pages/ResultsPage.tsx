@@ -18,7 +18,10 @@ export function ResultsPage() {
     );
   }
 
-  if (poll.status === 'open') {
+  // Show results as soon as any days have been scheduled
+  const hasScheduledDays = poll.scheduled_days && poll.scheduled_days.length > 0;
+
+  if (poll.status === 'open' && !hasScheduledDays) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-muted-foreground">
@@ -31,6 +34,13 @@ export function ResultsPage() {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-bold">תוצאות - שבוע {poll.week_start}</h2>
+      {poll.status === 'open' && hasScheduledDays && (
+        <Card>
+          <CardContent className="py-3 text-center text-sm text-muted-foreground">
+            תוצאות חלקיות - {poll.scheduled_days.length} ימים תוזמנו, ימים נוספים יתוזמנו בהמשך
+          </CardContent>
+        </Card>
+      )}
       <ScheduleResults pollId={poll.id} />
     </div>
   );

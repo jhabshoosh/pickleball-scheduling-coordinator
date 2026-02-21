@@ -52,6 +52,11 @@ export const api = {
       method: 'POST',
       headers: getAdminHeaders(),
     }),
+  generateScheduleForDay: (pollId: number, day: number) =>
+    request<any>(`/schedule/${pollId}/generate/${day}`, {
+      method: 'POST',
+      headers: getAdminHeaders(),
+    }),
   getWhatsApp: (pollId: number) =>
     request<any>(`/schedule/${pollId}/whatsapp`),
 

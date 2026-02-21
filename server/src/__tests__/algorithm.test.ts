@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateSchedule } from '../scheduler/algorithm';
-import { VoteWithPlayer, DayOfWeek } from '../../../shared/types';
+import { generateSchedule, generateScheduleForDay, seedStateFromSessions } from '../scheduler/algorithm';
+import { VoteWithPlayer, DayOfWeek, Session } from '../../../shared/types';
 import { calculateCost } from '../scheduler/costCalculator';
 
 function makeVote(
@@ -128,6 +128,137 @@ describe('generateSchedule', () => {
       if (session.player_ids.includes(1)) player1Count++;
     }
     expect(player1Count).toBeLessThanOrEqual(2);
+  });
+});
+
+function makeSession(day: DayOfWeek, playerIds: number[], opts: Partial<Session> = {}): Session {
+  return {
+    id: 1,
+    poll_id: 1,
+    day_of_week: day,
+    session_date: '2026-03-01',
+    time: '20:00',
+    court_number: 1,
+    player_ids: playerIds,
+    reserver_id: null,
+    is_singles: false,
+    total_cost: 130,
+    cost_per_person: 32.5,
+    status: 'planned',
+    ...opts,
+  };
+}
+
+describe('generateScheduleForDay', () => {
+  it('should schedule a single day', () => {
+    const votes = [
+      makeVote(1, 'A', [0, 1]),
+      makeVote(2, 'B', [0, 1]),
+      makeVote(3, 'C', [0, 1]),
+      makeVote(4, 'D', [0, 1]),
+    ];
+    const result = generateScheduleForDay(1, '2026-03-01', 0 as DayOfWeek, votes);
+    expect(result.sessions.length).toBeGreaterThanOrEqual(1);
+    // All sessions should be on day 0
+    for (const s of result.sessions) {
+      expect(s.day_of_week).toBe(0);
+    }
+  });
+
+  it('should respect max_sessions from pre-seeded sessions', () => {
+    const votes = [
+      makeVote(1, 'A', [0, 1, 2], { max_sessions: 2 }),
+      makeVote(2, 'B', [0, 1, 2]),
+      makeVote(3, 'C', [0, 1, 2]),
+      makeVote(4, 'D', [0, 1, 2]),
+    ];
+    // Player 1 already played on day 0 and day 1
+    const existingSessions = [
+      makeSession(0, [1, 2, 3, 4]),
+      makeSession(1, [1, 2, 3, 4]),
+    ];
+    const result = generateScheduleForDay(1, '2026-03-01', 2 as DayOfWeek, votes, existingSessions);
+    // Player 1 should NOT appear on day 2 (already at max_sessions=2)
+    for (const s of result.sessions) {
+      expect(s.player_ids).not.toContain(1);
+    }
+  });
+
+  it('should respect mutual_exclusion across pre-seeded days', () => {
+    const votes = [
+      makeVote(1, 'A', [0, 2], {
+        constraints: [{ type: 'mutual_exclusion', days: [0, 2] }],
+      }),
+      makeVote(2, 'B', [0, 2]),
+      makeVote(3, 'C', [0, 2]),
+      makeVote(4, 'D', [0, 2]),
+    ];
+    // Player 1 already played on day 0
+    const existingSessions = [makeSession(0, [1, 2, 3, 4])];
+    const result = generateScheduleForDay(1, '2026-03-01', 2 as DayOfWeek, votes, existingSessions);
+    // Player 1 should NOT appear on day 2 due to mutual_exclusion with day 0
+    for (const s of result.sessions) {
+      expect(s.player_ids).not.toContain(1);
+    }
+  });
+
+  it('should respect no_consecutive across pre-seeded days', () => {
+    const votes = [
+      makeVote(1, 'A', [0, 1], {
+        constraints: [{ type: 'no_consecutive' }],
+      }),
+      makeVote(2, 'B', [0, 1]),
+      makeVote(3, 'C', [0, 1]),
+      makeVote(4, 'D', [0, 1]),
+    ];
+    // Player 1 already played on day 0
+    const existingSessions = [makeSession(0, [1, 2, 3, 4])];
+    const result = generateScheduleForDay(1, '2026-03-01', 1 as DayOfWeek, votes, existingSessions);
+    // Player 1 should NOT appear on day 1 (consecutive to day 0)
+    for (const s of result.sessions) {
+      expect(s.player_ids).not.toContain(1);
+    }
+  });
+
+  it('should prioritize players with min_sessions deficit', () => {
+    const votes = [
+      makeVote(1, 'A', [0, 2], { min_sessions: 2 }),
+      makeVote(2, 'B', [0, 2], { min_sessions: 1 }),
+      makeVote(3, 'C', [0, 2], { min_sessions: 1 }),
+      makeVote(4, 'D', [0, 2], { min_sessions: 1 }),
+      makeVote(5, 'E', [0, 2], { min_sessions: 1 }),
+      makeVote(6, 'F', [2], { min_sessions: 1 }),
+    ];
+    // Players 2-5 already played on day 0, player 1 did not (has deficit)
+    const existingSessions = [makeSession(0, [2, 3, 4, 5])];
+    const result = generateScheduleForDay(1, '2026-03-01', 2 as DayOfWeek, votes, existingSessions);
+    // Player 1 should be included on day 2 due to min_sessions deficit
+    const allPlayerIds = result.sessions.flatMap(s => s.player_ids);
+    expect(allPlayerIds).toContain(1);
+  });
+
+  it('should handle day with no available players', () => {
+    const votes = [
+      makeVote(1, 'A', [0]),
+      makeVote(2, 'B', [0]),
+    ];
+    const result = generateScheduleForDay(1, '2026-03-01', 3 as DayOfWeek, votes);
+    expect(result.sessions).toHaveLength(0);
+  });
+});
+
+describe('seedStateFromSessions', () => {
+  it('should populate state from existing sessions', () => {
+    const sessions = [
+      makeSession(0, [1, 2, 3]),
+      makeSession(1, [2, 3, 4]),
+    ];
+    const state = seedStateFromSessions(sessions);
+    expect(state.playerAssignments.get(1)?.has(0)).toBe(true);
+    expect(state.playerAssignments.get(1)?.has(1)).toBeFalsy();
+    expect(state.playerAssignments.get(2)?.has(0)).toBe(true);
+    expect(state.playerAssignments.get(2)?.has(1)).toBe(true);
+    expect(state.playerAssignments.get(4)?.has(1)).toBe(true);
   });
 });
 
